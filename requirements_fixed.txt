@@ -1,0 +1,5 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.4
+# Note: starlette version is managed by fastapi dependency
+# pip vulnerability requires container base image update
