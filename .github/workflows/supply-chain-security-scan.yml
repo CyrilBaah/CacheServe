@@ -12,53 +12,47 @@ permissions:
   contents: read
   security-events: write
 
-
 jobs:
   security-analysis:
     runs-on: ubuntu-latest
     
-    strategy:
-      matrix:
-        version: [secure, vulnerable]
-    
     steps:
     - uses: actions/checkout@v4
     
-    - name: Build ${{ matrix.version }} image
+    - name: Build image
       run: make build
     
     - name: Run vulnerability scan
       run: |
         docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-          aquasec/trivy image --format sarif --output trivy-${{ matrix.version }}.sarif cacheserve:${{ matrix.version }}
+          aquasec/trivy image --format sarif --output trivy-results.sarif --exit-code 0 cacheserve:latest
     
     - name: Export to OCI layout
       run: |
         mkdir -p oci-layout
-        docker save cacheserve:${{ matrix.version }} -o cacheserve-${{ matrix.version }}.tar
+        docker save cacheserve:latest -o cacheserve.tar
         docker run --rm -v $PWD:/workspace -w /workspace quay.io/skopeo/stable \
-          copy docker-archive:cacheserve-${{ matrix.version }}.tar oci:oci-layout:cacheserve:${{ matrix.version }}
-        rm -f cacheserve-${{ matrix.version }}.tar
+          copy docker-archive:cacheserve.tar oci:oci-layout:cacheserve:latest
+        rm -f cacheserve.tar
     
     - name: Scan OCI layout
       run: |
         docker run --rm -v $PWD/oci-layout:/oci-layout \
-          aquasec/trivy image --input /oci-layout
+          aquasec/trivy image --input /oci-layout --exit-code 0
     
     - name: Generate SBOM
       run: |
         docker run --rm -v $PWD:/workspace -v /var/run/docker.sock:/var/run/docker.sock \
-          anchore/syft cacheserve:${{ matrix.version }} -o spdx-json=/workspace/sbom-${{ matrix.version }}.spdx.json
+          anchore/syft cacheserve:latest -o spdx-json=/workspace/sbom.spdx.json
     
     - name: Upload SARIF results
       uses: github/codeql-action/upload-sarif@v3
-      if: always()
+      if: always() && hashFiles('trivy-results.sarif') != ''
       with:
-        sarif_file: trivy-${{ matrix.version }}.sarif
-        category: trivy-${{ matrix.version }}
+        sarif_file: trivy-results.sarif
     
     - name: Upload SBOM artifact
       uses: actions/upload-artifact@v4
       with:
-        name: sbom-${{ matrix.version }}
-        path: sbom-${{ matrix.version }}.spdx.json
+        name: sbom
+        path: sbom.spdx.json

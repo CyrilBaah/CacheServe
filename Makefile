@@ -1,10 +1,12 @@
-.PHONY: install run build scan test clean help oci-export oci-scan sbom vuln-scan security-full
+.PHONY: install run build build-secure build-vulnerable scan test clean help oci-export oci-scan sbom vuln-scan security-full
 
 help:
 	@echo "Available commands:"
 	@echo "  install      - Install dependencies"
 	@echo "  run          - Run the application locally"
-	@echo "  build        - Build Docker image"
+	@echo "  build        - Build Docker image (secure version)"
+	@echo "  build-secure - Build secure Docker image"
+	@echo "  build-vulnerable - Build vulnerable Docker image"
 	@echo "  scan         - Run basic security scan"
 	@echo "  vuln-scan    - Run vulnerability scan with Trivy"
 	@echo "  oci-export   - Export image to OCI layout"
@@ -22,6 +24,12 @@ run:
 
 build:
 	docker build -t cacheserve:latest .
+
+build-secure:
+	docker build -t cacheserve:secure --build-arg REQUIREMENTS_FILE=requirements_fixed.txt .
+
+build-vulnerable:
+	docker build -t cacheserve:vulnerable --build-arg REQUIREMENTS_FILE=requirements_vulnerable.txt .
 
 scan:
 	@echo "Running basic filesystem scan..."
