@@ -29,10 +29,10 @@ jobs:
     
     - name: Run vulnerability scan
       run: |
-        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-          aquasec/trivy image --format sarif --output trivy-results.sarif --exit-code 0 cacheserve:latest
-        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-          aquasec/trivy image --format table --output trivy-results.html --exit-code 0 cacheserve:latest
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/output \
+          aquasec/trivy image --format sarif --output /output/trivy-results.sarif --exit-code 0 cacheserve:latest
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/output \
+          aquasec/trivy image --format template --template '@contrib/html.tpl' --output /output/trivy-results.html --exit-code 0 cacheserve:latest
     
     - name: Export to OCI layout
       run: |
@@ -51,6 +51,9 @@ jobs:
       run: |
         docker run --rm -v $PWD:/workspace -v /var/run/docker.sock:/var/run/docker.sock \
           anchore/syft cacheserve:latest -o spdx-json=/workspace/sbom.spdx.json
+    
+    - name: List generated files
+      run: ls -la *.html *.sarif *.json || echo "No files found"
     
     - name: Upload SARIF results
       uses: github/codeql-action/upload-sarif@v3
