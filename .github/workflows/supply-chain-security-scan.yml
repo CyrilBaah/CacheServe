@@ -17,9 +17,6 @@ permissions:
 jobs:
   security-analysis:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
     - uses: actions/checkout@v4
@@ -34,26 +31,10 @@ jobs:
         docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/output \
           aquasec/trivy image --format template --template '@contrib/html.tpl' --output /output/trivy-results.html --exit-code 0 cacheserve:latest
     
-    - name: Export to OCI layout
-      run: |
-        mkdir -p oci-layout
-        docker save cacheserve:latest -o cacheserve.tar
-        docker run --rm -v $PWD:/workspace -w /workspace quay.io/skopeo/stable \
-          copy docker-archive:cacheserve.tar oci:oci-layout:cacheserve:latest
-        rm -f cacheserve.tar
-    
-    - name: Scan OCI layout
-      run: |
-        docker run --rm -v $PWD/oci-layout:/oci-layout \
-          aquasec/trivy image --input /oci-layout --exit-code 0
-    
     - name: Generate SBOM
       run: |
         docker run --rm -v $PWD:/workspace -v /var/run/docker.sock:/var/run/docker.sock \
           anchore/syft cacheserve:latest -o spdx-json=/workspace/sbom.spdx.json
-    
-    - name: List generated files
-      run: ls -la *.html *.sarif *.json || echo "No files found"
     
     - name: Upload SARIF results
       uses: github/codeql-action/upload-sarif@v3
@@ -61,50 +42,57 @@ jobs:
       with:
         sarif_file: trivy-results.sarif
     
-    - name: Upload SARIF artifact
+    - name: Upload reports
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: trivy-sarif-results
-        path: trivy-results.sarif
+        name: security-reports
+        path: |
+          trivy-results.html
+          sbom.spdx.json
+
+  deploy-pages:
+    needs: security-analysis
+    runs-on: ubuntu-latest
+    if: always()
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     
-    - name: Upload HTML report
-      uses: actions/upload-artifact@v4
-      if: always()
+    steps:
+    - name: Download reports
+      uses: actions/download-artifact@v4
       with:
-        name: trivy-html-report
-        path: trivy-results.html
+        name: security-reports
+        path: reports
+    
+    - name: Prepare Pages content
+      run: |
+        mkdir -p pages
+        cp reports/trivy-results.html pages/ || echo "HTML file not found"
+        cp reports/sbom.spdx.json pages/ || echo "SBOM file not found"
+        echo "<h1>Security Reports</h1><ul><li><a href='trivy-results.html'>Vulnerability Report</a></li><li><a href='sbom.spdx.json'>SBOM</a></li></ul>" > pages/index.html
     
     - name: Setup Pages
       uses: actions/configure-pages@v4
-      if: always()
     
     - name: Upload to GitHub Pages
       uses: actions/upload-pages-artifact@v3
-      if: always()
       with:
-        path: .
-        name: github-pages
+        path: pages
     
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
-      if: always()
     
     - name: Comment report link
       uses: actions/github-script@v7
-      if: always() && github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request'
       with:
         script: |
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: '🔍 **Security Reports**: [Vulnerability Report](${{ steps.deployment.outputs.page_url }}trivy-results.html) | [SBOM](${{ steps.deployment.outputs.page_url }}sbom.spdx.json)'
+            body: '🔍 **Security Reports**: [View Reports](${{ steps.deployment.outputs.page_url }})'
           })
-    
-    - name: Upload SBOM artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: sbom
-        path: sbom.spdx.json
