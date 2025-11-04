@@ -1,0 +1,59 @@
+name: Security Analysis
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * 1'
+
+jobs:
+  security-analysis:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        version: [secure, vulnerable]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build ${{ matrix.version }} image
+      run: make build-${{ matrix.version }}
+    
+    - name: Run vulnerability scan
+      run: |
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy image --format sarif --output trivy-${{ matrix.version }}.sarif cacheserve:${{ matrix.version }}
+    
+    - name: Export to OCI layout
+      run: |
+        mkdir -p oci-layout
+        docker save cacheserve:${{ matrix.version }} -o cacheserve-${{ matrix.version }}.tar
+        docker run --rm -v $PWD:/workspace -w /workspace quay.io/skopeo/stable \
+          copy docker-archive:cacheserve-${{ matrix.version }}.tar oci:oci-layout:cacheserve:${{ matrix.version }}
+        rm -f cacheserve-${{ matrix.version }}.tar
+    
+    - name: Scan OCI layout
+      run: |
+        docker run --rm -v $PWD/oci-layout:/oci-layout \
+          aquasec/trivy image --input /oci-layout
+    
+    - name: Generate SBOM
+      run: |
+        docker run --rm -v $PWD:/workspace -v /var/run/docker.sock:/var/run/docker.sock \
+          anchore/syft cacheserve:${{ matrix.version }} -o spdx-json=/workspace/sbom-${{ matrix.version }}.spdx.json
+    
+    - name: Upload SARIF results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: trivy-${{ matrix.version }}.sarif
+        category: trivy-${{ matrix.version }}
+    
+    - name: Upload SBOM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-${{ matrix.version }}
+        path: sbom-${{ matrix.version }}.spdx.json
